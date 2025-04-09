@@ -124,14 +124,14 @@ class Music(commands.Cog):
             await ctx.reply(f"An error occured: {e}")   
 
     async def prepare_song(self,ctx,query):
+        source = ytdl.extract_info(query,download=True)
+        filename = source['requested_downloads'][0]['filepath']
+        
         if ctx.voice_client.is_playing():
-            source = ytdl.extract_info(query,download=True)
-            filename = ytdl.prepare_filename(source)
             self.queue.append(filename)
             await ctx.reply(f"Added to queue: {source['title']}")
             return
-        source = ytdl.extract_info(query,download=True)
-        filename = ytdl.prepare_filename(source)
+        
         song = discord.PCMVolumeTransformer(discord.FFmpegPCMAudio(filename, **ffmpeg_options))
         ctx.voice_client.play(song,
             after = lambda e: self.clean_up(ctx, filename)
