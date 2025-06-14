@@ -35,6 +35,7 @@ class Music(commands.Cog):
     def __init__(self, bot: commands.bot):
         self.bot = bot
         self.repeatFlag = False
+        self.busy = False
         self.leavingAudioFlag = False
         self.queue = []
         self.audPath = Path('.').resolve().parent / 'Audio'
@@ -82,11 +83,14 @@ class Music(commands.Cog):
         except:
             await ctx.reply("I'm not connected to a voice channel.")
             return
-        self.afk_timer.stop()
+        self.afk_timer.cancel()
 
     @commands.command()
     async def play(self, ctx, query):
         """Plays the audio from the provided youtube link or searches youtube for the provided song title"""
+        
+        self.busy = True # begin busy state - prevent afk timer from disconnecting
+        
         try:
             async with ctx.typing():
                 if ctx.voice_client is None:
@@ -121,9 +125,12 @@ class Music(commands.Cog):
                     choice = source['entries'][reactions.index(reaction)]['webpage_url']
                     await self.prepare_song(ctx,choice)
         except Exception as e:
-            await ctx.reply(f"An error occured: {e}")   
+            await ctx.reply(f"An error occured: {e}")
+            
+        self.busy = False # end busy state
 
     async def prepare_song(self,ctx,query):
+        """Function for handling file preparation before playing""" 
         source = ytdl.extract_info(query,download=True)
         filename = source['requested_downloads'][0]['filepath']
         
@@ -154,6 +161,7 @@ class Music(commands.Cog):
             )
         else:
             os.remove(filename)
+        
         self.afk_timer.restart()
      
     @commands.command()
@@ -190,18 +198,26 @@ class Music(commands.Cog):
         else:
             ctx.voice_client.stop()
     
-    @tasks.loop(seconds = 0)
+    @tasks.loop(seconds = 0) # 5 minute timer, Not implemented here since the code will execute immediately then wait till the next loop 
     async def afk_timer(self):
-        await asyncio.sleep(300) # 300s - 5 minutes
-        for vc in self.bot.voice_clients:
-            if not vc.is_playing():
+        await asyncio.sleep(300) # 300s - wait 5 minutes before executing idle code
+        print(f"Checking AFK: Is Busy? {self.busy}")
+        if self.busy: # exit idle timer early if bot is busy
+            return
+        
+        if not self.bot.voice_clients: # exit idle timer early if there are no vc's
+            self.afk_timer.cancel()
+            return
+        
+        for vc in self.bot.voice_clients: # check each vc to see if should be dc'd
+            if not vc.is_playing() and not self.busy:
                 if self.leavingAudioFlag:
                     song = discord.PCMVolumeTransformer(discord.FFmpegPCMAudio(self.audPath / 'leaving.m4a', **ffmpeg_options))
                     vc.play(song)
                     await asyncio.sleep(3)
                 await vc.disconnect()
                 print(f"Disconnected from {vc.channel}")
-                self.afk_timer.stop()
+                self.afk_timer.cancel()
         return
 
 async def setup(bot):
